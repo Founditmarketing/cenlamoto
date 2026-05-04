@@ -1,20 +1,21 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# cenlamoto — National Tire & Auto Hub
+Vite + React + TypeScript website for Central Louisiana's premier automotive service hub.
 
-# Run and deploy your AI Studio app
+## Stack
+- **Frontend**: React 19, TypeScript, Tailwind CSS v4, Framer Motion
+- **API**: Vercel Serverless Functions (Node.js runtime)
+- **Inventory**: Live Google Sheets integration via googleapis
+- **AI Chat**: Gemini 2.5 Flash
 
-This contains everything you need to run your app locally.
+## Environment Variables
+See `.env.example` for all required variables including:
+- `GOOGLE_SHEET_ID` — Spreadsheet ID for live inventory
+- `GOOGLE_CLIENT_EMAIL` — Service account email
+- `GOOGLE_PRIVATE_KEY` — Service account private key (Vercel handles newline escaping)
 
-View your app in AI Studio: https://ai.studio/apps/002c8e64-255e-4dad-b113-1045e561b4f8
+## Routes
+| Path | Description |
+|------|-------------|
+| `/inventory` | Live inventory list from Google Sheets |
+| `/equipment/:id` | Individual item detail page |
 
-## Run Locally
-
-**Prerequisites:**  Node.js
-
-
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
