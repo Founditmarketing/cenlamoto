@@ -19,7 +19,7 @@ function getItemId(item: InventoryItem, index: number): string {
 
 // Pick display-worthy columns for the card preview (skip verbose or id columns)
 function getPreviewFields(item: InventoryItem): { label: string; value: string }[] {
-  const skipKeys = ['description', 'notes', 'image', 'img', 'photo', 'url', 'link'];
+  const skipKeys = ['description', 'notes', 'image', 'images', 'img', 'photo', 'url', 'link'];
   return Object.entries(item)
     .filter(([k, v]) => v && !skipKeys.some((s) => k.toLowerCase().includes(s)))
     .slice(0, 4)

@@ -5,6 +5,16 @@ import { ArrowLeft, Loader2, AlertCircle, Tag, Hash, Phone, ChevronRight } from 
 import { useInventory, InventoryItem } from '../hooks/useInventory';
 import { useCallRouting } from '../hooks/useCallRouting';
 
+/**
+ * Convert a Google Drive share URL to a directly embeddable image URL.
+ * e.g. https://drive.google.com/file/d/FILE_ID/view?... → https://drive.google.com/thumbnail?id=FILE_ID&sz=w800
+ */
+function toDriveImageUrl(url: string): string {
+  const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
+  if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
+  return url;
+}
+
 // Resolve the item id back to an original value (undo URL-encoding/slugging)
 function decodeItemId(slug: string): string {
   return decodeURIComponent(slug).replace(/-/g, ' ');
@@ -43,7 +53,7 @@ function findItem(
 }
 
 // Columns to exclude from the full detail view (usually handled separately)
-const EXCLUDED_DISPLAY_KEYS = new Set(['image', 'img', 'photo', 'url', 'link', 'thumbnail']);
+const EXCLUDED_DISPLAY_KEYS = new Set(['image', 'images', 'img', 'photo', 'url', 'link', 'thumbnail']);
 
 export default function EquipmentDetail() {
   const { id: idSlug = '' } = useParams<{ id: string }>();
@@ -71,11 +81,13 @@ export default function EquipmentDetail() {
 
   const imageKey = item
     ? Object.keys(item).find((k) =>
-        ['image', 'img', 'photo', 'thumbnail'].includes(k.toLowerCase())
+        ['image', 'images', 'img', 'photo', 'thumbnail'].includes(k.toLowerCase())
       )
     : null;
 
-  const imageUrl = imageKey && item ? item[imageKey] : null;
+  // Take only the first image URL if multiple are comma-separated, then convert Drive links
+  const rawImageUrl = imageKey && item ? item[imageKey].split(',')[0].trim() : null;
+  const imageUrl = rawImageUrl ? toDriveImageUrl(rawImageUrl) : null;
 
   const displayFields = item
     ? Object.entries(item).filter(
