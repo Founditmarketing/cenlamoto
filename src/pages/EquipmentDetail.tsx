@@ -1,103 +1,98 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { useParams, useLocation, Link } from 'react-router-dom';
 import { motion } from 'motion/react';
-import { ArrowLeft, Loader2, AlertCircle, Tag, Hash, Phone, ChevronRight } from 'lucide-react';
+import {
+  ArrowLeft, Loader2, AlertCircle, Tag, Phone, ChevronRight, Layers, ImageOff, ChevronLeft,
+} from 'lucide-react';
 import { useInventory, InventoryItem } from '../hooks/useInventory';
 import { useCallRouting } from '../hooks/useCallRouting';
 
-/**
- * Convert a Google Drive share URL to a directly embeddable image URL.
- * e.g. https://drive.google.com/file/d/FILE_ID/view?... → https://drive.google.com/thumbnail?id=FILE_ID&sz=w800
- */
-function toDriveImageUrl(url: string): string {
+// ── Image helpers ─────────────────────────────────────────────────────────────
+
+function toDriveThumb(url: string, size = 'w1200'): string | null {
   const match = url.match(/\/file\/d\/([a-zA-Z0-9_-]+)/);
-  if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
-  return url;
+  if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=${size}`;
+  return null;
 }
 
-// Resolve the item id back to an original value (undo URL-encoding/slugging)
-function decodeItemId(slug: string): string {
-  return decodeURIComponent(slug).replace(/-/g, ' ');
+/** Extract ALL valid Drive thumbnail URLs from the Images cell */
+function getAllImages(imagesCell: string): string[] {
+  if (!imagesCell) return [];
+  const parts = imagesCell
+    .split(/,|\s+(?=https?:\/\/)/)
+    .map((s) => s.trim())
+    .filter((s) => s.startsWith('http'));
+  return parts.map((u) => toDriveThumb(u)).filter(Boolean) as string[];
 }
 
-// Given the full inventory list and the route slug, find the matching item.
+// ── Item lookup ───────────────────────────────────────────────────────────────
+
 function findItem(
   items: InventoryItem[],
   idSlug: string,
   locationState: InventoryItem | null
-): { item: InventoryItem | null; index: number } {
-  // Fast path: router state carried the item directly (same-session navigation)
-  if (locationState) return { item: locationState, index: -1 };
-
-  // Reconstruct what the slug was built from
-  const decoded = decodeItemId(idSlug);
-
-  // Try matching by index (numeric slug)
+): { item: InventoryItem | null } {
+  if (locationState) return { item: locationState };
+  const decoded = decodeURIComponent(idSlug).replace(/-/g, ' ');
   const numeric = parseInt(idSlug, 10);
-  if (!isNaN(numeric) && items[numeric]) return { item: items[numeric], index: numeric };
-
-  // Try matching by common id/sku columns
-  const idColumns = ['id', 'sku', 'item id', 'item_id', 'stock #', 'stock#', 'part number', 'part#'];
+  if (!isNaN(numeric) && items[numeric]) return { item: items[numeric] };
   for (const item of items) {
-    for (const key of Object.keys(item)) {
-      if (idColumns.includes(key.toLowerCase())) {
-        const val = item[key].toLowerCase().replace(/\s+/g, '-');
-        if (val === idSlug.toLowerCase() || item[key].toLowerCase() === decoded.toLowerCase()) {
-          return { item, index: -1 };
-        }
-      }
-    }
+    const productSlug = (item['Product'] ?? '').replace(/\s+/g, '-').replace(/['"$]/g, '').slice(0, 60);
+    if (productSlug.toLowerCase() === decoded.toLowerCase()) return { item };
+    if ((item['SKU'] ?? '').toLowerCase() === decoded.toLowerCase()) return { item };
   }
-
-  return { item: null, index: -1 };
+  return { item: null };
 }
 
-// Columns to exclude from the full detail view (usually handled separately)
-const EXCLUDED_DISPLAY_KEYS = new Set(['image', 'images', 'img', 'photo', 'url', 'link', 'thumbnail']);
+// ── Format helpers ────────────────────────────────────────────────────────────
+
+function formatPrice(price: string): string {
+  const num = parseFloat(price);
+  if (isNaN(num)) return price;
+  return `$${num.toLocaleString()}`;
+}
+
+const CATEGORY_COLORS: Record<string, string> = {
+  'Golf Carts': 'bg-emerald-500/15 text-emerald-400 border-emerald-500/20',
+  'Riding Mowers': 'bg-amber-500/15 text-amber-400 border-amber-500/20',
+};
+function getCategoryStyle(cat: string): string {
+  return CATEGORY_COLORS[cat] ?? 'bg-brand-blue/10 text-brand-blue border-brand-blue/20';
+}
+
+// Fields to hide from the spec table (handled in UI separately)
+const HIDDEN_FIELDS = new Set(['Product', 'Images', 'Price', 'Unavailable', 'Committed', 'Incoming']);
+
+// ── Component ─────────────────────────────────────────────────────────────────
 
 export default function EquipmentDetail() {
   const { id: idSlug = '' } = useParams<{ id: string }>();
   const location = useLocation();
   const { phoneHref } = useCallRouting();
   const { items, loading, error } = useInventory();
+  const [photoIndex, setPhotoIndex] = useState(0);
+  const [imgError, setImgError] = useState(false);
 
-  // The Inventory list page passes state={{ item, index }} for instant rendering
   const locationItem: InventoryItem | null = (location.state as any)?.item ?? null;
   const { item } = findItem(items, idSlug, locationItem);
 
-  // Derive display fields
-  const nameKey = item
-    ? Object.keys(item).find((k) =>
-        ['name', 'title', 'item', 'product', 'description'].includes(k.toLowerCase())
-      )
-    : null;
-  const displayName = item && nameKey ? item[nameKey] : `Equipment #${idSlug}`;
+  const images = item ? getAllImages(item['Images'] ?? '') : [];
+  const activeImage = images[photoIndex] ?? null;
 
-  const priceKey = item
-    ? Object.keys(item).find((k) =>
-        ['price', 'cost', 'rate', 'msrp'].includes(k.toLowerCase())
-      )
-    : null;
+  const category = item?.['Category'] ?? '';
+  const price = item?.['Price'] ?? '';
+  const available = item?.['Available'] ?? '0';
+  const onHand = item?.['On Hand'] ?? '0';
+  const inStock = parseInt(onHand, 10) > 0 || parseInt(available, 10) > 0;
 
-  const imageKey = item
-    ? Object.keys(item).find((k) =>
-        ['image', 'images', 'img', 'photo', 'thumbnail'].includes(k.toLowerCase())
-      )
-    : null;
-
-  // Take only the first image URL if multiple are comma-separated, then convert Drive links
-  const rawImageUrl = imageKey && item ? item[imageKey].split(',')[0].trim() : null;
-  const imageUrl = rawImageUrl ? toDriveImageUrl(rawImageUrl) : null;
-
-  const displayFields = item
-    ? Object.entries(item).filter(
-        ([k, v]) => v && k !== nameKey && !EXCLUDED_DISPLAY_KEYS.has(k.toLowerCase())
-      )
+  const specFields = item
+    ? Object.entries(item).filter(([k]) => !HIDDEN_FIELDS.has(k))
     : [];
 
   return (
     <div className="pt-24 min-h-screen bg-slate-900">
-      {/* Back breadcrumb */}
+
+      {/* Breadcrumb */}
       <div className="border-b border-white/5 bg-slate-950">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4">
           <nav className="flex items-center gap-2 text-sm text-slate-500" aria-label="Breadcrumb">
@@ -105,7 +100,7 @@ export default function EquipmentDetail() {
             <ChevronRight className="w-3.5 h-3.5" />
             <Link to="/inventory" className="hover:text-slate-300 transition-colors">Inventory</Link>
             <ChevronRight className="w-3.5 h-3.5" />
-            <span className="text-slate-300 font-medium truncate max-w-xs">{displayName}</span>
+            <span className="text-slate-300 font-medium truncate max-w-xs">{item?.['Product'] ?? idSlug}</span>
           </nav>
         </div>
       </div>
@@ -146,77 +141,144 @@ export default function EquipmentDetail() {
         </div>
       )}
 
-      {/* Detail View */}
+      {/* Detail */}
       {item && (
-        <section className="py-12">
+        <section className="py-10">
           <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
             <div className="grid lg:grid-cols-5 gap-10">
 
-              {/* Left / Image column */}
+              {/* ── Left: Images + Specs ── */}
               <motion.div
                 className="lg:col-span-3 flex flex-col gap-6"
                 initial={{ opacity: 0, x: -20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5 }}
               >
-                {/* Image */}
-                {imageUrl ? (
-                  <div className="rounded-2xl overflow-hidden border border-white/10 bg-slate-800/50 aspect-video flex items-center justify-center">
+                {/* Main image */}
+                <div className="rounded-2xl overflow-hidden border border-white/10 bg-slate-800/50 aspect-[4/3] flex items-center justify-center relative">
+                  {activeImage && !imgError ? (
                     <img
-                      src={imageUrl}
-                      alt={displayName}
+                      key={activeImage}
+                      src={activeImage}
+                      alt={item['Product']}
                       className="w-full h-full object-cover"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).style.display = 'none';
-                      }}
+                      onError={() => setImgError(true)}
                     />
-                  </div>
-                ) : (
-                  <div className="rounded-2xl border border-white/10 bg-slate-800/30 aspect-video flex flex-col items-center justify-center gap-3 text-slate-600">
-                    <div className="w-16 h-16 rounded-2xl bg-white/5 flex items-center justify-center">
-                      <Hash className="w-8 h-8" />
+                  ) : (
+                    <div className="flex flex-col items-center gap-3 text-slate-600">
+                      <ImageOff className="w-12 h-12" />
+                      <span className="text-sm">No image available</span>
                     </div>
-                    <span className="text-sm">No image available</span>
+                  )}
+
+                  {/* Prev/Next arrows when multiple images */}
+                  {images.length > 1 && (
+                    <>
+                      <button
+                        onClick={() => { setImgError(false); setPhotoIndex((i) => (i - 1 + images.length) % images.length); }}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
+                        aria-label="Previous image"
+                      >
+                        <ChevronLeft className="w-5 h-5" />
+                      </button>
+                      <button
+                        onClick={() => { setImgError(false); setPhotoIndex((i) => (i + 1) % images.length); }}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 bg-black/50 hover:bg-black/70 text-white rounded-full p-2 transition-colors"
+                        aria-label="Next image"
+                      >
+                        <ChevronRight className="w-5 h-5" />
+                      </button>
+                      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 flex gap-1.5">
+                        {images.map((_, i) => (
+                          <button
+                            key={i}
+                            onClick={() => { setImgError(false); setPhotoIndex(i); }}
+                            className={`w-2 h-2 rounded-full transition-all ${i === photoIndex ? 'bg-white scale-125' : 'bg-white/40'}`}
+                            aria-label={`Photo ${i + 1}`}
+                          />
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                {/* Thumbnail strip */}
+                {images.length > 1 && (
+                  <div className="flex gap-2 overflow-x-auto pb-1">
+                    {images.map((img, i) => (
+                      <button
+                        key={i}
+                        onClick={() => { setImgError(false); setPhotoIndex(i); }}
+                        className={`shrink-0 w-16 h-16 rounded-lg overflow-hidden border-2 transition-all ${
+                          i === photoIndex ? 'border-brand-blue' : 'border-white/10 opacity-60 hover:opacity-100'
+                        }`}
+                        aria-label={`Thumbnail ${i + 1}`}
+                      >
+                        <img src={img} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
                   </div>
                 )}
 
-                {/* All Data Fields */}
+                {/* Spec table */}
                 <div className="bg-slate-800/30 border border-white/5 rounded-2xl divide-y divide-white/5 overflow-hidden">
-                  {displayFields.map(([key, value]) => (
+                  <div className="px-5 py-3 bg-slate-900/50">
+                    <p className="text-xs font-bold text-slate-500 uppercase tracking-widest">Specifications</p>
+                  </div>
+                  {specFields.map(([key, value]) => (
                     <div key={key} className="flex items-start justify-between gap-4 px-5 py-3.5">
                       <span className="text-slate-500 text-sm capitalize shrink-0 w-36">{key}</span>
-                      <span className="text-slate-200 text-sm font-medium text-right">{value}</span>
+                      <span className="text-slate-200 text-sm font-medium text-right">{value || '—'}</span>
                     </div>
                   ))}
                 </div>
               </motion.div>
 
-              {/* Right / Summary column */}
+              {/* ── Right: Summary + CTA ── */}
               <motion.div
                 className="lg:col-span-2 flex flex-col gap-6"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 transition={{ duration: 0.5, delay: 0.1 }}
               >
-                {/* Title card */}
-                <div className="bg-slate-800/50 border border-white/5 rounded-2xl p-6">
-                  <div className="flex items-center gap-2 text-xs text-slate-500 font-semibold uppercase tracking-widest mb-3">
-                    <Hash className="w-3.5 h-3.5" />
-                    {idSlug}
-                  </div>
-                  <h1 className="text-2xl md:text-3xl font-display font-bold text-white mb-4 leading-tight">
-                    {displayName}
+                <div className="bg-slate-800/50 border border-white/5 rounded-2xl p-6 flex flex-col gap-4">
+                  {/* Category badge */}
+                  {category && (
+                    <span className={`inline-flex items-center gap-1.5 self-start px-3 py-1 rounded-full text-xs font-semibold border ${getCategoryStyle(category)}`}>
+                      <Layers className="w-3.5 h-3.5" />
+                      {category}
+                    </span>
+                  )}
+
+                  {/* Name */}
+                  <h1 className="text-2xl md:text-3xl font-display font-bold text-white leading-tight">
+                    {item['Product']}
                   </h1>
-                  {priceKey && item[priceKey] && (
-                    <div className="flex items-center gap-2 text-2xl font-bold text-emerald-400 mb-6">
-                      <Tag className="w-5 h-5" />
-                      {item[priceKey]}
+
+                  {/* Price */}
+                  {price && (
+                    <div className="flex items-center gap-2 text-3xl font-bold text-emerald-400">
+                      <Tag className="w-6 h-6" />
+                      {formatPrice(price)}
                     </div>
                   )}
-                  <p className="text-slate-400 text-sm leading-relaxed mb-6">
-                    Interested in this item? Contact our team for full specifications, availability confirmation, and pricing details.
+
+                  {/* Stock status */}
+                  <div className={`inline-flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold border self-start ${
+                    inStock
+                      ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20'
+                      : 'bg-slate-700/50 text-slate-400 border-white/10'
+                  }`}>
+                    <span className={`w-2 h-2 rounded-full ${inStock ? 'bg-emerald-400' : 'bg-slate-500'}`} />
+                    {inStock ? `${onHand} In Stock` : 'Contact Us for Availability'}
+                  </div>
+
+                  <p className="text-slate-400 text-sm leading-relaxed">
+                    Interested in this item? Contact our team for full details, availability confirmation, and financing options.
                   </p>
-                  <div className="flex flex-col gap-3">
+
+                  {/* CTAs */}
+                  <div className="flex flex-col gap-3 pt-2">
                     <a
                       href={phoneHref}
                       id="equipment-call-cta"
@@ -235,7 +297,7 @@ export default function EquipmentDetail() {
                   </div>
                 </div>
 
-                {/* Back link */}
+                {/* Back */}
                 <Link
                   to="/inventory"
                   id="back-to-inventory"
@@ -244,6 +306,7 @@ export default function EquipmentDetail() {
                   <ArrowLeft className="w-4 h-4" /> Back to All Inventory
                 </Link>
               </motion.div>
+
             </div>
           </div>
         </section>
