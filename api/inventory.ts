@@ -2,7 +2,7 @@ import { google } from 'googleapis';
 
 // Vercel: disable caching so live inventory always reflects the latest sheet data.
 export const config = {
-  runtime: 'nodejs20.x',
+  runtime: 'nodejs',
 };
 
 const SPREADSHEET_ID = process.env.GOOGLE_SHEET_ID;
